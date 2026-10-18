@@ -1,57 +1,82 @@
-# Secure LLM Pipeline
+# Veil
 
-Pipeline local care trimite prompturi către un LLM **fără ca providerul să vadă date sensibile** și fără ca vreodată să primească o cheie de criptare.
+**A local privacy firewall between you and any LLM.**
 
-Track: AI pipeline secret sharing.
+Veil runs on your machine as an OpenAI-compatible proxy. Before a prompt leaves your device, secrets (API keys, passwords, tokens) and personal data (names, emails, phones, IBANs, SSNs) are replaced with placeholder tokens. The provider only ever sees `[EMAIL_1]`, `[OPENAI_KEY_1]`, and so on. The answer is restored locally. The master key never reaches the provider.
 
-## Arhitectură
+Track: AI pipeline secret sharing. Made by **Major Matt Razvan**.
 
-1. **Master key** (256 biți) generată local cu `OsRng`, apoi împărțită cu **Shamir 3-din-5** peste GF(256). Cheia întreagă nu este stocată.
-2. **Mascare**: datele sensibile (email, telefon, IBAN, CNP, card, nume) sunt înlocuite cu token-uri `[EMAIL_1]`, `[PERSON_1]` etc.
-3. **LLM-ul primește doar textul mascat.** Nu primește nicio cheie.
-4. **Mapping-ul** token → valoare reală este criptat cu **AES-256-GCM** (nonce aleator, AAD) și rămâne local.
-5. **Răspunsul** este demascat local.
-6. Cheia se reconstruiește în memorie doar cât e necesar, apoi se zeroizează.
+## Why it matters
 
-## Nucleul criptografic (Rust)
+People paste source code with API keys, customer data and patient records into AI tools every day. Veil makes that safe by default, and works with any app by changing one line (`base_url`).
 
-- `seclib` (Rust + PyO3): AES-256-GCM, Shamir Secret Sharing implementat peste GF(256) cu aritmetică **fără ramificări dependente de secret**.
-- Interpolare Lagrange în x = 0, polinoame aleatoare de grad t-1.
-- Zeroizare cu crate-ul `zeroize`.
+## How it works
 
-## Model de amenințare
+1. **Mask**: a scanner detects secrets and personal data and swaps them for tokens.
+2. **Send**: only the masked text goes to the provider (`store: false` for zero retention).
+3. **Restore**: tokens in the answer are replaced with the real values, locally.
+4. **Encrypt**: the token-to-value mapping is encrypted with AES-256-GCM (random 96-bit nonce, AAD).
+5. **Vault**: conversation history is stored encrypted on disk. The vault key is split with **Shamir 3-of-5**; any 3 key holders can open it, fewer than 3 learn nothing.
+6. **Fail closed**: if masking fails, the request is blocked, never forwarded in clear.
 
-Adversar: providerul LLM (curios sau compromis) și un observator de rețea. Se presupune că dispozitivul local nu este compromis.
+## Core (Rust)
 
-## Vulnerabilități acoperite
+`seclib` (Rust + PyO3) implements AES-256-GCM and Shamir Secret Sharing over GF(256) with branch-free field arithmetic, Lagrange interpolation at x = 0, and `zeroize` for key material.
 
-| Risc | Mitigare |
+## Features
+
+- OpenAI-compatible endpoint: `POST /v1/chat/completions`
+- Secret scanner: OpenAI, Anthropic, AWS, GitHub, Google, Slack, JWT, private keys, `password=` pairs
+- Personal data: email, phone, IBAN, card, SSN, CNP, names
+- Web UI (localhost only): playground, leak report, audit log, vault reader
+- Prompt injection demo: the provider has no key to reveal
+
+## Threat model
+
+Adversary: the LLM provider (curious or compromised) and a network observer. The local device is assumed uncompromised while running.
+
+## Mitigated risks
+
+| Risk | Mitigation |
 |---|---|
-| Date sensibile ajung la provider | Mascare înainte de trimitere |
-| Master key în prompt/loguri | Cheia nu pleacă niciodată de pe dispozitiv |
-| Compromiterea unui singur loc de stocare | Shamir 3-din-5 |
-| Reutilizare nonce AES-GCM | Nonce aleator de 96 biți pe fiecare criptare |
-| Modificarea datelor | Tag de autentificare GCM |
-| Ciphertext folosit în alt context | AAD |
-| Cheie rămasă în memorie | Zeroizare în Rust și ștergere în Python |
-| Istoric păstrat de provider | `store: false` în apelul API |
+| Sensitive data reaches the provider | Local masking before sending |
+| Master key in prompts or logs | Key never leaves the device |
+| Single point of compromise for history | Shamir 3-of-5 vault |
+| AES-GCM nonce reuse | Fresh random nonce per encryption |
+| Data tampering or reordering | GCM tag + entry index in AAD |
+| Key left in memory | `zeroize` in Rust, wiped after use |
+| Provider keeps history | `store: false` |
+| Remote access to the UI | Host check (localhost only), attempt limit on vault |
 
-## Limitări (onest)
+## Limitations
 
-- Detectarea cu regex nu prinde orice (nume cu litere mici, formate neobișnuite). Producția ar necesita NER local.
-- Contextul rămâne vizibil providerului (ex: „fiica mea de 7 ani din Iași").
-- Obiectele `bytes` din Python sunt imutabile și nu pot fi zeroizate complet.
-- Lungimea mesajului nu este ascunsă.
-- Un atacator cu acces la dispozitiv în timpul rulării poate citi memoria.
+- Detection is heuristic (regex). Unusual formats, lowercase names or letter-only passwords can be missed. Production use would add entropy checks and a local NER model.
+- Context stays visible to the provider ("my 7-year-old daughter in Iasi").
+- Message length is not hidden.
+- While running, the vault key is in process memory; the 3-of-5 threshold protects history at rest, not against an attacker controlling the live process.
+- Python `bytes` objects are immutable and cannot be fully zeroized.
+- Truncating the end of `vault.bin` is not detected (reordering and edits are).
+- Losing 3 shares makes the history unrecoverable.
 
-## Rulare
+## Run
 
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install maturin requests textual
-maturin develop
-python test_security.py
-python tui.py
+pip install maturin requests fastapi uvicorn
+maturin develop --release
+python test_security.py && python test_vault.py
+python proxy.py        # open http://127.0.0.1:8000
 ```
 
-Opțional: `export OPENAI_API_KEY=...` pentru LLM real. Fără cheie rulează un mock.
+Optional: `export OPENAI_API_KEY=...` for a real LLM. Without it, a mock is used.
+
+Use from any app:
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="unused")
+```
+
+## Video
+
+(add YouTube link here)

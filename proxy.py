@@ -8,12 +8,20 @@ import requests
 import seclib
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 import vault
 from masker import Masker
 
 app = FastAPI(title="Veil")
+
+
+@app.middleware("http")
+async def local_only(request, call_next):
+    host = request.headers.get("host", "").split(":")[0]
+    if host not in ("127.0.0.1", "localhost"):
+        return JSONResponse({"detail": "forbidden host"}, status_code=403)
+    return await call_next(request)
 
 # Key used to encrypt the per-request mapping: split 3-of-5, full key never kept.
 _master = seclib.generate_key()
@@ -128,6 +136,32 @@ def chat_completions(body: dict):
     finally:
         for i in range(len(key)):
             key[i] = 0
+
+
+FAILED = {"n": 0}
+
+
+@app.post("/api/vault/read")
+def vault_read(body: dict):
+    if FAILED["n"] >= 5:
+        raise HTTPException(429, "Too many failed attempts. Restart Veil to try again.")
+    shares = body.get("shares")
+    if not isinstance(shares, list) or len(shares) < 3:
+        raise HTTPException(400, "Provide 3 shares.")
+    with VAULT_LOCK:
+        try:
+            v = vault.Vault.unlock([str(x) for x in shares])
+        except (ValueError, IndexError):
+            FAILED["n"] += 1
+            raise HTTPException(403, "Wrong shares. The vault stays locked.")
+        try:
+            entries = vault.read_all(v.key)
+        except ValueError:
+            raise HTTPException(500, "Vault is corrupted or was tampered with.")
+        finally:
+            v.close()
+    FAILED["n"] = 0
+    return {"entries": entries}
 
 
 def open_vault():

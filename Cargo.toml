@@ -1,0 +1,19 @@
+[package]
+name = "seclib"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "seclib"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+aes-gcm = "0.10"
+rand = "0.8"
+zeroize = "1"
+subtle = "2"
+
+[profile.release]
+opt-level = 3
+lto = true

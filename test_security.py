@@ -1,56 +1,99 @@
 import seclib
 from masker import Masker
 
-ok = 0
+passed = 0
+total = 0
+
+
 def check(name, cond):
-    global ok
+    global passed, total
+    total += 1
+    passed += bool(cond)
     print(("PASS  " if cond else "FAIL  ") + name)
-    ok += cond
+
 
 key = seclib.generate_key()
-msg = b"date secrete"
+msg = b"private data"
 
-# 1. nonce unic
+# --- Crypto core ---
 a = seclib.encrypt(key, msg)
 b = seclib.encrypt(key, msg)
-check("nonce unic: acelasi text -> ciphertext diferit", a != b and a[:12] != b[:12])
+check("unique nonce: same plaintext -> different ciphertext", a != b and a[:12] != b[:12])
+check("ciphertext does not contain plaintext", msg not in a)
 
-# 2. cheie gresita
 try:
     seclib.decrypt(seclib.generate_key(), a)
-    check("cheie gresita respinsa", False)
+    check("wrong key rejected", False)
 except ValueError:
-    check("cheie gresita respinsa", True)
+    check("wrong key rejected", True)
 
-# 3. AAD gresit
 blob = seclib.encrypt(key, msg, b"ctx-A")
 try:
     seclib.decrypt(key, blob, b"ctx-B")
-    check("AAD gresit respins", False)
+    check("wrong AAD (context) rejected", False)
 except ValueError:
-    check("AAD gresit respins", True)
+    check("wrong AAD (context) rejected", True)
 
-# 4. sub prag
+bad = bytearray(blob)
+bad[20] ^= 1
+try:
+    seclib.decrypt(key, bytes(bad), b"ctx-A")
+    check("tampered ciphertext rejected", False)
+except ValueError:
+    check("tampered ciphertext rejected", True)
+
+# --- Shamir ---
 shares = seclib.split_secret(key, 3, 5)
-check("3 share-uri reconstruiesc cheia", seclib.combine_shares(shares[:3]) == key)
-check("2 share-uri NU reconstruiesc cheia", seclib.combine_shares(shares[:2]) != key)
-
-# 5. share duplicat
+check("3 of 5 shares reconstruct the key", seclib.combine_shares(shares[:3]) == key)
+check("any 3 shares work", seclib.combine_shares([shares[0], shares[2], shares[4]]) == key)
+check("2 shares do NOT reconstruct the key", seclib.combine_shares(shares[:2]) != key)
 try:
     seclib.combine_shares([shares[0], shares[0], shares[1]])
-    check("share duplicat respins", False)
+    check("duplicate share rejected", False)
 except ValueError:
-    check("share duplicat respins", True)
+    check("duplicate share rejected", True)
 
-# 6. nimic sensibil catre provider
-secrets = ["Ion Popescu", "ion.popescu@gmail.com", "0712345678",
-           "RO49AAAA1B31007593840000", "1960101123456"]
-text = "Sunt Ion Popescu, ion.popescu@gmail.com, 0712345678, RO49AAAA1B31007593840000, CNP 1960101123456."
-masked = Masker().mask(text)
-leaks = [s for s in secrets if s in masked]
-check(f"niciun secret in textul trimis la provider (scurgeri: {leaks})", not leaks)
+# --- Secret scanner (fake keys built at runtime) ---
+secrets = {
+    "openai": "sk-" + "proj-" + "abcdEFGH1234" * 4,
+    "aws": "AKIA" + "IOSFODNN7EXAMPLE",
+    "github": "ghp_" + "a1B2c3D4e5" * 4,
+    "password": "Sup3rS3cretPass!",
+}
+code = (
+    f'OPENAI_API_KEY = "{secrets["openai"]}"\n'
+    f'aws_key = {secrets["aws"]}\n'
+    f'GITHUB = {secrets["github"]}\n'
+    f'db_password = "{secrets["password"]}"\n'
+)
+m = Masker()
+masked = m.mask(code)
+leaks = [n for n, s in secrets.items() if s in masked]
+check(f"no secret leaves the device (leaks: {leaks})", not leaks)
+check("secrets are replaced by tokens", "[OPENAI_KEY_1]" in masked and "[AWS_KEY_1]" in masked)
+check("secret report counts 4 items", m.report()["secret"] == 4)
+check("unmask restores the original", m.unmask(masked) == code)
 
-# 7. ciphertext-ul nu contine plaintext
-check("ciphertext-ul nu contine plaintext", msg not in a)
+# --- Personal data ---
+personal = {
+    "name": "John Smith",
+    "email": "john.smith@example.com",
+    "phone": "+1 415 555 0132",
+    "ssn": "123-45-6789",
+    "iban": "GB29NWBK60161331926819",
+}
+text = (f"My name is {personal['name']}, email {personal['email']}, phone {personal['phone']}, "
+        f"SSN {personal['ssn']}, IBAN {personal['iban']}. Write me a confirmation email.")
+m2 = Masker()
+masked2 = m2.mask(text)
+leaks2 = [n for n, s in personal.items() if s in masked2]
+check(f"no personal data leaves the device (leaks: {leaks2})", not leaks2)
+check("normal words are not masked", "Write me a confirmation email" in masked2)
 
-print(f"\n{ok} teste trecute")
+# --- Encrypted mapping round trip ---
+enc = m2.export_encrypted(key)
+m3 = Masker()
+m3.import_encrypted(key, enc)
+check("encrypted mapping decrypts correctly", m3.unmask(masked2) == text)
+
+print(f"\n{passed}/{total} tests passed")

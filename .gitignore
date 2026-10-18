@@ -4,3 +4,4 @@ __pycache__/
 *.so
 *.whl
 .DS_Store
+vault.bin

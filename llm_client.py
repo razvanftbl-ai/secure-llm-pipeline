@@ -1,9 +1,10 @@
 import os
+
 import requests
 
 
 def call_llm(masked_prompt):
-    """Trimite DOAR textul mascat. Foloseste OpenAI daca exista cheie, altfel mock."""
+    """Send ONLY the masked text. Uses OpenAI if a key is set, otherwise a local mock."""
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return _mock(masked_prompt)
@@ -17,8 +18,8 @@ def call_llm(masked_prompt):
             "messages": [
                 {
                     "role": "system",
-                    "content": "Tokenurile de forma [TIP_N] sunt placeholdere. "
-                               "Pastreaza-le exact asa cum sunt in raspuns.",
+                    "content": "Tokens shaped like [TYPE_N] are placeholders for private data. "
+                               "Keep them exactly as written in your answer.",
                 },
                 {"role": "user", "content": masked_prompt},
             ],
@@ -30,4 +31,4 @@ def call_llm(masked_prompt):
 
 
 def _mock(masked_prompt):
-    return f"[MOCK LLM] Am primit: «{masked_prompt}». Salut [PERSON_1], iti raspund pe [EMAIL_1]."
+    return f"[MOCK LLM] I received: \"{masked_prompt}\""

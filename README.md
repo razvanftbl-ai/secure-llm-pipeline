@@ -79,4 +79,4 @@ client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="unused")
 
 ## Video
 
-(add YouTube link here)
+https://youtu.be/2E8HP_y_7yQ?is=0UwDG1e0IBWYhImz

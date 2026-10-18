@@ -14,7 +14,7 @@ PATTERNS = [
     ("GOOGLE_KEY", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"), 0, "secret"),
     ("SLACK_TOKEN", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"), 0, "secret"),
     ("JWT", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"), 0, "secret"),
-    ("PASSWORD", re.compile(r"(?i)(?:password|passwd|pwd|secret|api[_-]?key|token)\s*[=:]\s*['\"]?(?!\[)([^\s'\",;]{5,}[^\s'\",;.])"), 1, "secret"),
+    ("PASSWORD", re.compile(r"(?i)(?:password|passwd|pwd|secret|api[_-]?key|token)\s*[=:]\s*['\"]?(?!\[)((?![A-Za-z_][A-Za-z_.]*[)\s,;]|[A-Za-z_][A-Za-z_.]*$)[^\s'\",;)]{5,}[^\s'\",;.)])"), 1, "secret"),
     ("EMAIL", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), 0, "personal"),
     ("IBAN", re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"), 0, "personal"),
     ("CARD", re.compile(r"\b(?:\d{4}[ -]?){3}\d{4}\b"), 0, "personal"),

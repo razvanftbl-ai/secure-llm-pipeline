@@ -97,3 +97,11 @@ m3.import_encrypted(key, enc)
 check("encrypted mapping decrypts correctly", m3.unmask(masked2) == text)
 
 print(f"\n{passed}/{total} tests passed")
+
+# --- Regression: variable names are not passwords ---
+m4 = Masker()
+code2 = 'return psycopg2.connect(password=db_password)'
+check("variable name after password= is kept", m4.mask(code2) == code2)
+m5 = Masker()
+check("real value after password= is masked", "[PASSWORD_1]" in m5.mask('password="Sup3rS3cretPass!"'))
+print(f"\n{passed}/{total} tests passed (final)")
